@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, Header
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
+from fastapi.openapi.models import OAuthFlows as OAuthFlowsModel
+from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.openapi.utils import get_openapi
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -55,7 +58,11 @@ gemini_model = None
 
 # Authorization setup
 EXPECTED_TOKEN = "6613ee9a3bcb0925802224950bfad9d70f8be3907dc22442d035ae7798dbe14b"
-security = HTTPBearer()
+security = HTTPBearer(
+    scheme_name="Bearer Token",
+    description="Enter your bearer token",
+    auto_error=True
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1045,6 +1052,35 @@ async def debug_document(
     except Exception as e:
         logger.error(f"Debug processing failed: {str(e)}")
         raise HTTPException(500, f"Debug error: {str(e)}")
+
+# OpenAPI customization
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter your bearer token"
+        }
+    }
+    # Apply security to all endpoints except health and root
+    for path in openapi_schema["paths"]:
+        for method in openapi_schema["paths"][path]:
+            if path not in ["/", "/health"]:
+                openapi_schema["paths"][path][method]["security"] = [{"BearerAuth": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 # if __name__ == "__main__":
 #     uvicorn.run(
